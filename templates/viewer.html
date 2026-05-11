@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>{{ world.display_name }} — {{ "3D World" if mode == "3d" else "Pano" }}</title>
+  {% if mode == "pano" %}
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/core@5/index.min.css">
+  {% endif %}
+  <style>
+    body, html { margin: 0; padding: 0; overflow: hidden; background: #000; height: 100%; }
+    #viewer { width: 100vw; height: 100vh; background: #000; }
+    canvas { display: block; }
+    .overlay {
+      position: fixed; top: 16px; left: 16px; z-index: 10;
+      background: rgba(0,0,0,0.65); color: white;
+      padding: 12px 16px; border-radius: 8px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      backdrop-filter: blur(8px);
+      max-width: 90vw;
+    }
+    .overlay h1 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+    .overlay .hint { font-size: 12px; color: #b8b8c2; margin-bottom: 6px; }
+    .overlay a {
+      color: #9a8cff; text-decoration: none; font-size: 13px; margin-right: 10px;
+    }
+    .overlay a:hover { text-decoration: underline; }
+    .mode-pill {
+      display: inline-block; padding: 2px 8px; border-radius: 4px;
+      font-size: 11px; font-weight: 600; letter-spacing: 0.3px;
+      background: {% if mode == "3d" %}#0f3a1a; color: #6dd58c;{% else %}#1f1f3a; color: #9a8cff;{% endif %}
+      margin-left: 6px; vertical-align: middle;
+    }
+    #status {
+      position: fixed; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 12px;
+      color: #aaa; font-family: -apple-system, sans-serif; font-size: 14px; z-index: 5;
+      pointer-events: none; text-align: center; padding: 20px;
+    }
+    #status .big { font-size: 16px; color: #ddd; }
+    #status .progress {
+      width: 280px; height: 6px; background: #222; border-radius: 3px; overflow: hidden;
+    }
+    #status .progress-bar {
+      height: 100%; background: #6c5ce7; width: 0%; transition: width 0.2s;
+    }
+    #error {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      background: #2a0f0f; color: #ff8a8a; padding: 20px;
+      border-radius: 8px; font-family: monospace; font-size: 13px;
+      max-width: 80vw; display: none; z-index: 20; white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <div class="overlay">
+    <h1>{{ world.display_name }} <span class="mode-pill">{{ "3D" if mode == "3d" else "PANO" }}</span></h1>
+    <div class="hint">
+      {% if mode == "3d" %}
+      WASD to move · drag to look · scroll to zoom · Shift to move faster · R to reset
+      {% else %}
+      Drag to look around · scroll to zoom (cannot move position in pano mode)
+      {% endif %}
+    </div>
+    <a href="/">← Back</a>
+    {% if world.splat_url and mode == "pano" %}<a href="/view/{{ world.id }}?mode=3d">Switch to 3D →</a>{% endif %}
+    {% if world.pano_url and mode == "3d" %}<a href="/view/{{ world.id }}?mode=pano">Switch to pano →</a>{% endif %}
+    <a href="/debug/{{ world.id }}" target="_blank">Debug</a>
+  </div>
+
+  <div id="status">
+    <div class="big">{% if mode == "3d" %}Loading 3D world…{% else %}Loading panorama…{% endif %}</div>
+    {% if mode == "3d" %}
+    <div class="progress"><div class="progress-bar" id="progressBar"></div></div>
+    <div style="font-size: 12px; color: #888;" id="progressText">Initializing Spark renderer…</div>
+    {% endif %}
+  </div>
+  <div id="error"></div>
+  <div id="viewer"></div>
+
+{% if mode == "3d" %}
+  <!-- ============================================================
+       3D MODE — Spark Gaussian Splat renderer (sparkjs.dev)
+       Follows the official Getting Started example pattern.
+       ============================================================ -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.180.0/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+        "@sparkjsdev/spark": "https://sparkjs.dev/releases/spark/2.0.0/spark.module.js"
+      }
+    }
+  </script>
+  <script type="module">
+    import * as THREE from "three";
+    import { SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
+    import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
+    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+    const status = document.getElementById("status");
+    const errorBox = document.getElementById("error");
+    const progressBar = document.getElementById("progressBar");
+    const progressText = document.getElementById("progressText");
+
+    function showError(msg) {
+      status.style.display = "none";
+      errorBox.textContent = msg;
+      errorBox.style.display = "block";
+      console.error(msg);
+    }
+
+    // --- Scene, camera, renderer (canonical Spark Getting Started setup) ---
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x000000);
+
+    const camera = new THREE.PerspectiveCamera(
+      60, window.innerWidth / window.innerHeight, 0.01, 1000
+    );
+    camera.position.set(0, 0, 0);   // start at the splat's origin (the capture point)
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.getElementById("viewer").appendChild(renderer.domElement);
+
+    // SparkRenderer must be added to the scene so it can manage splat rendering.
+    const spark = new SparkRenderer({ renderer });
+    scene.add(spark);
+
+    // --- Load the splat through the Flask proxy (no CORS hassles) ---
+    const splatURL = "/splat/{{ world.id }}";
+
+    progressText.textContent = "Downloading splat file…";
+
+    const splatMesh = new SplatMesh({
+      url: splatURL,
+      // Marble's coordinate convention: this quaternion flips the splat right-side up
+      // for THREE.js's Y-up world. Same value used in Spark's own example.
+      onProgress: (event) => {
+        if (event.lengthComputable && event.total > 0) {
+          const pct = (event.loaded / event.total) * 100;
+          progressBar.style.width = pct + "%";
+          progressText.textContent =
+            `Downloading: ${(event.loaded / 1048576).toFixed(1)} / ${(event.total / 1048576).toFixed(1)} MB`;
+        } else {
+          progressText.textContent = `Downloaded: ${(event.loaded / 1048576).toFixed(1)} MB`;
+        }
+      },
+      onLoad: (mesh) => {
+        progressText.textContent = "Splat loaded, computing scene…";
+        // Auto-frame: compute bounding box and place the camera at the centre
+        // looking towards the rest of the scene.
+        try {
+          const bbox = mesh.getBoundingBox(true);
+          const center = new THREE.Vector3();
+          bbox.getCenter(center);
+          // Look from slightly above-and-back-of the centre
+          const size = new THREE.Vector3();
+          bbox.getSize(size);
+          const maxDim = Math.max(size.x, size.y, size.z);
+          camera.position.set(center.x, center.y, center.z + maxDim * 0.4);
+          camera.lookAt(center);
+          controls.target.copy(center);
+          controls.update();
+        } catch (e) {
+          console.warn("Auto-frame failed; using default camera.", e);
+        }
+        status.style.display = "none";
+      }
+    });
+    splatMesh.quaternion.set(1, 0, 0, 0);   // standard Marble/Spark orientation flip
+    scene.add(splatMesh);
+
+    // --- Orbit controls (drag to look, scroll to zoom, right-drag to pan) ---
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.rotateSpeed = 0.6;
+    controls.zoomSpeed = 1.2;
+    controls.panSpeed = 1.0;
+    controls.screenSpacePanning = true;
+
+    // --- WASD movement (like Marble's own viewer) ---
+    const keys = { w: 0, a: 0, s: 0, d: 0, e: 0, q: 0, shift: 0 };
+    const keyMap = {
+      KeyW: "w", KeyA: "a", KeyS: "s", KeyD: "d",
+      KeyE: "e", KeyQ: "q",
+      Space: "e",
+      ShiftLeft: "shift", ShiftRight: "shift",
+    };
+    window.addEventListener("keydown", (e) => {
+      if (keyMap[e.code] !== undefined) keys[keyMap[e.code]] = 1;
+      if (e.code === "KeyR") {
+        // Return to origin
+        camera.position.set(0, 0, 0);
+        controls.target.set(0, 0, -1);
+      }
+    });
+    window.addEventListener("keyup", (e) => {
+      if (keyMap[e.code] !== undefined) keys[keyMap[e.code]] = 0;
+    });
+
+    const moveSpeed = 0.05;
+    const forward = new THREE.Vector3();
+    const right = new THREE.Vector3();
+    const up = new THREE.Vector3(0, 1, 0);
+
+    function step() {
+      const speed = moveSpeed * (keys.shift ? 3 : 1);
+      camera.getWorldDirection(forward);
+      right.crossVectors(forward, up).normalize();
+
+      if (keys.w) { camera.position.addScaledVector(forward, speed); controls.target.addScaledVector(forward, speed); }
+      if (keys.s) { camera.position.addScaledVector(forward, -speed); controls.target.addScaledVector(forward, -speed); }
+      if (keys.d) { camera.position.addScaledVector(right, speed); controls.target.addScaledVector(right, speed); }
+      if (keys.a) { camera.position.addScaledVector(right, -speed); controls.target.addScaledVector(right, -speed); }
+      if (keys.e) { camera.position.y += speed; controls.target.y += speed; }
+      if (keys.q) { camera.position.y -= speed; controls.target.y -= speed; }
+    }
+
+    // --- Render loop ---
+    renderer.setAnimationLoop(() => {
+      step();
+      controls.update();
+      renderer.render(scene, camera);
+    });
+
+    // --- Resize handling ---
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // --- Sanity: if the splat 404s, the fetch in SplatMesh will fail quietly.
+    //     Pre-flight check via HEAD so we can show a useful error. ---
+    fetch(splatURL, { method: "HEAD" }).then((r) => {
+      if (!r.ok) {
+        showError(
+          `Splat file not found (HTTP ${r.status} on ${splatURL}).\n\n` +
+          `This usually means the splat_url field is empty in your DB.\n` +
+          `Open /debug/{{ world.id }} and click "Refetch from the API" to populate it.\n` +
+          `If refetch doesn't help, open /raw/{{ world.id }} to inspect the API response.`
+        );
+      }
+    }).catch(() => { /* network glitch; let the actual splat loader handle it */ });
+  </script>
+
+{% else %}
+  <!-- ============================================================
+       PANO MODE — Photo Sphere Viewer (equirectangular)
+       ============================================================ -->
+  <script type="importmap">
+    {
+      "imports": {
+        "@photo-sphere-viewer/core": "https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/core@5/index.module.js",
+        "three": "https://cdn.jsdelivr.net/npm/three@0.166.0/build/three.module.js"
+      }
+    }
+  </script>
+  <script type="module">
+    import { Viewer } from "@photo-sphere-viewer/core";
+
+    const status = document.getElementById("status");
+    const errorBox = document.getElementById("error");
+    const panoUrl = "/pano/{{ world.id }}";
+
+    try {
+      const viewer = new Viewer({
+        container: document.getElementById("viewer"),
+        panorama: panoUrl,
+        navbar: ["zoom", "fullscreen"],
+        defaultZoomLvl: 30,
+      });
+      viewer.addEventListener("ready", () => { status.style.display = "none"; });
+      viewer.addEventListener("panorama-error", (e) => {
+        status.style.display = "none";
+        errorBox.textContent = "Panorama failed to load: " + (e.error?.message || "unknown");
+        errorBox.style.display = "block";
+      });
+    } catch (err) {
+      status.style.display = "none";
+      errorBox.textContent = "Viewer init failed: " + err.message;
+      errorBox.style.display = "block";
+    }
+  </script>
+{% endif %}
+</body>
+</html>

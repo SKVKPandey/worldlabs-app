@@ -1,0 +1,22 @@
+# never commit secrets, data or builds
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite*
+*.pem
+*.key
+*.crt
+*.csv
+*.xlsx
+*.zip
+*.log
+__pycache__/
+.venv/
+venv/
+node_modules/
+instance/
+uploads/
+.wrangler/
+.output/
+dist/

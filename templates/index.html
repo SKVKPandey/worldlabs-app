@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>World Labs — Test App</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      max-width: 980px; margin: 32px auto; padding: 0 20px;
+      background: #0f0f14; color: #e7e7ea;
+    }
+    h1 { margin-bottom: 4px; }
+    .sub { color: #8a8a95; margin-top: 0; margin-bottom: 22px; }
+    .card {
+      background: #1a1a22; border: 1px solid #2a2a34;
+      border-radius: 10px; padding: 20px; margin-bottom: 18px;
+    }
+    .flash {
+      background: #3a0f0f; color: #ff8a8a; padding: 10px 14px;
+      border-radius: 6px; margin-bottom: 14px; font-size: 14px;
+    }
+    .tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid #2a2a34; }
+    .tab {
+      padding: 10px 16px; cursor: pointer; color: #8a8a95;
+      border-bottom: 2px solid transparent; font-size: 14px;
+    }
+    .tab.active { color: #e7e7ea; border-bottom-color: #6c5ce7; }
+    .pane { display: none; }
+    .pane.active { display: block; }
+    label { display: block; margin: 10px 0 6px; font-size: 14px; color: #b8b8c2; }
+    input, textarea, select {
+      width: 100%; padding: 10px 12px; border-radius: 6px;
+      border: 1px solid #2a2a34; background: #0f0f14; color: #e7e7ea;
+      font-family: inherit; font-size: 14px;
+    }
+    input[type="file"] { padding: 8px; }
+    textarea { resize: vertical; min-height: 70px; }
+    button {
+      margin-top: 14px; padding: 10px 18px; border: 0;
+      background: #6c5ce7; color: white; border-radius: 6px;
+      font-weight: 600; cursor: pointer; font-size: 14px;
+    }
+    button:hover { background: #5a4bd1; }
+    .help {
+      font-size: 12px; color: #8a8a95; margin-top: 6px; line-height: 1.5;
+    }
+    .multi-row {
+      display: grid; grid-template-columns: 1fr 140px;
+      gap: 10px; align-items: center; margin-bottom: 8px;
+    }
+    .small-btn {
+      margin-top: 0; padding: 6px 12px; font-size: 12px;
+      background: #2a2a34;
+    }
+    .small-btn:hover { background: #3a3a44; }
+    .world {
+      display: flex; gap: 16px; align-items: center;
+      padding: 14px; border: 1px solid #2a2a34; border-radius: 8px;
+      margin-bottom: 10px; background: #14141c;
+    }
+    .world img {
+      width: 88px; height: 88px; object-fit: cover;
+      border-radius: 6px; background: #2a2a34;
+    }
+    .meta { flex: 1; }
+    .name { font-weight: 600; margin-bottom: 4px; }
+    .prompt { font-size: 13px; color: #8a8a95; margin-bottom: 6px; }
+    .badge {
+      display: inline-block; padding: 3px 8px; border-radius: 4px;
+      font-size: 11px; font-weight: 600; letter-spacing: 0.3px;
+      margin-right: 6px;
+    }
+    .b-pending, .b-in_progress { background: #3a2f00; color: #ffd966; }
+    .b-succeeded { background: #0f3a1a; color: #6dd58c; }
+    .b-failed, .b-timeout { background: #3a0f0f; color: #ff8a8a; }
+    .kind { background: #1f1f2a; color: #b8b8c2; font-size: 10px; }
+    .actions a {
+      display: inline-block; margin-left: 8px; color: #9a8cff;
+      text-decoration: none; font-size: 14px;
+    }
+    .actions a:hover { text-decoration: underline; }
+    .empty { color: #6a6a75; text-align: center; padding: 30px; }
+    .info-box {
+      background: #15151e; border-left: 3px solid #6c5ce7;
+      padding: 10px 14px; font-size: 13px; line-height: 1.5;
+      color: #b8b8c2; margin-bottom: 14px; border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🌍 World Labs Test App</h1>
+  <p class="sub">Generate a Marble world from a prompt, a 360° pano, or multiple images.</p>
+
+  {% with messages = get_flashed_messages() %}
+    {% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}
+  {% endwith %}
+
+  <div class="card">
+    <div class="tabs">
+      <div class="tab active" data-tab="text">Text</div>
+      <div class="tab" data-tab="pano">360° Pano</div>
+      <div class="tab" data-tab="multi">Multi-image</div>
+    </div>
+
+    <form method="POST" action="{{ url_for('generate') }}" enctype="multipart/form-data" id="genForm">
+      <input type="hidden" name="mode" id="modeField" value="text">
+
+      <label>Display name</label>
+      <input name="display_name" placeholder="My World" required>
+
+      <label>Model</label>
+      <select name="model">
+        <option value="marble-1.1">marble-1.1 (default)</option>
+        <option value="marble-1.1-plus">marble-1.1-plus (larger worlds, more credits)</option>
+      </select>
+
+      <!-- Text mode -->
+      <div class="pane active" data-pane="text">
+        <label>Prompt</label>
+        <textarea name="prompt" placeholder="A mystical forest with glowing mushrooms"></textarea>
+        <div class="help">Text-only generation. Good for fictional or generic scenes.</div>
+      </div>
+
+      <!-- Pano mode -->
+      <div class="pane" data-pane="pano">
+        <div class="info-box">
+          <strong>Best fidelity mode.</strong> A 360° equirectangular pano (2:1 aspect ratio)
+          gives the model complete spatial info — recommended for reconstructing a real place.
+          Note: the API only accepts <strong>one pano per generation</strong>. To combine multiple
+          panos (e.g. interior + exterior), generate each separately and stitch with Marble Studio Compose.
+        </div>
+        <label>360° panorama (jpg/png/webp, must be 2:1)</label>
+        <input type="file" name="pano_file" accept="image/jpeg,image/png,image/webp">
+        <label>Optional text prompt</label>
+        <textarea name="prompt" placeholder="Optional: describe the scene to guide generation"></textarea>
+        <div class="help">If your image is a 360 pano, leave the box unchecked-this app sets is_pano=true.</div>
+      </div>
+
+      <!-- Multi-image mode -->
+      <div class="pane" data-pane="multi">
+        <div class="info-box">
+          Up to <strong>8 normal images</strong>. Two sub-modes:
+          <ul style="margin: 6px 0 0 18px; padding: 0;">
+            <li><strong>Auto Layout</strong> (check the box): images must be of the same space,
+              same aspect ratio/resolution, with some overlap.</li>
+            <li><strong>Direction control</strong> (uncheck box): tag each image with an azimuth
+              — 0° Front, 90° Right, 180° Back, 270° Left. Up to 4 images works best.</li>
+          </ul>
+        </div>
+        <label style="display:flex; align-items:center; gap:8px; margin-top:14px;">
+          <input type="checkbox" name="auto_layout" style="width:auto;" checked>
+          Use Auto Layout (recommended for same-space photos)
+        </label>
+
+        <div id="multiList"></div>
+        <button type="button" class="small-btn" onclick="addMultiRow()">+ Add image</button>
+
+        <label style="margin-top:14px;">Optional text prompt</label>
+        <textarea name="prompt" placeholder="Optional: describe the scene"></textarea>
+      </div>
+
+      <button type="submit">Generate World</button>
+    </form>
+  </div>
+
+  <h2>Your worlds</h2>
+  {% if not worlds %}
+    <div class="empty">No worlds yet. Generate one above. (Takes ~5–10 min.)</div>
+  {% endif %}
+
+  {% for w in worlds %}
+    <div class="world" data-op="{{ w.operation_id }}">
+      <img src="{{ w.thumbnail_url or '' }}" alt="" onerror="this.style.visibility='hidden'">
+      <div class="meta">
+        <div class="name">{{ w.display_name }}</div>
+        <div class="prompt">{{ w.prompt }}</div>
+        <span class="badge b-{{ w.status|lower }}">{{ w.status }}</span>
+        <span class="badge kind">{{ w.input_kind }}</span>
+        {% if w.error %}<div style="color:#ff8a8a;font-size:12px;margin-top:4px;">{{ w.error }}</div>{% endif %}
+      </div>
+      <div class="actions">
+        {% if w.status == 'SUCCEEDED' %}
+          <a href="{{ url_for('view', world_db_id=w.id) }}">View pano →</a>
+          {% if w.marble_url %}<a href="{{ w.marble_url }}" target="_blank">Marble ↗</a>{% endif %}
+        {% endif %}
+      </div>
+    </div>
+  {% endfor %}
+
+  <script>
+    // Tab switching
+    const tabs = document.querySelectorAll('.tab');
+    const panes = document.querySelectorAll('.pane');
+    const modeField = document.getElementById('modeField');
+    tabs.forEach(t => t.addEventListener('click', () => {
+      tabs.forEach(x => x.classList.remove('active'));
+      panes.forEach(x => x.classList.remove('active'));
+      t.classList.add('active');
+      const target = t.dataset.tab;
+      document.querySelector(`.pane[data-pane="${target}"]`).classList.add('active');
+      modeField.value = target;
+      // Only keep textarea in active pane named "prompt" — others get cleared on submit
+    }));
+
+    // Strip inputs from inactive panes so they don't submit
+    document.getElementById('genForm').addEventListener('submit', (e) => {
+      const activeMode = modeField.value;
+      panes.forEach(p => {
+        if (p.dataset.pane !== activeMode) {
+          p.querySelectorAll('input, textarea, select').forEach(el => el.disabled = true);
+        }
+      });
+    });
+
+    // Multi-image row builder
+    const multiList = document.getElementById('multiList');
+    let multiCount = 0;
+    function addMultiRow() {
+      if (multiCount >= 8) return;
+      multiCount++;
+      const row = document.createElement('div');
+      row.className = 'multi-row';
+      row.innerHTML = `
+        <input type="file" name="multi_files" accept="image/jpeg,image/png,image/webp">
+        <select name="azimuths">
+          <option value="0">Front (0°)</option>
+          <option value="90">Right (90°)</option>
+          <option value="180">Back (180°)</option>
+          <option value="270">Left (270°)</option>
+        </select>
+      `;
+      multiList.appendChild(row);
+    }
+    // Start with 2 rows
+    addMultiRow(); addMultiRow();
+
+    // Status polling
+    async function refreshStatuses() {
+      const els = document.querySelectorAll('.world');
+      for (const el of els) {
+        const op = el.dataset.op;
+        const badge = el.querySelector('.badge');
+        if (!badge) continue;
+        const txt = badge.textContent.trim();
+        if (txt === 'SUCCEEDED' || txt === 'FAILED' || txt === 'TIMEOUT') continue;
+        try {
+          const r = await fetch(`/status/${op}`);
+          if (!r.ok) continue;
+          const d = await r.json();
+          if (d.status !== txt) location.reload();
+        } catch (e) {}
+      }
+    }
+    setInterval(refreshStatuses, 10000);
+  </script>
+</body>
+</html>
